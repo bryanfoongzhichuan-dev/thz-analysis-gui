@@ -150,9 +150,12 @@ class THzGUI(QMainWindow):
             a = a_f(freq, k)
             e_r, e_i = dielec(freq, n, a)
             cond_r, cond_i = conductivity(freq, e_r, e_i)
+            
             #maybe add parameters 2
             self.parameters = (freq, n, k, a, e_r, e_i)
             self.parameters2 = (cond_r, cond_i)
+            self.fullparameters = (freq, n, k, a, e_r, e_i, cond_r, cond_i)
+            
             '''
             tds_var = [(self.time_s, self.signal_s),(self.time_b, self.signal_b)]
             fds_var = [(freq, np.abs(y_s)), (freq2, np.abs(y_b))]
@@ -168,7 +171,7 @@ class THzGUI(QMainWindow):
             plot_multiple(tds_var, labels=None, title="TDS plots", xlabel="Time", ylabel="Signal", styles=None, grid=True, show=True)
             plot_multiple(fds_var, labels=None, title="FDS plots", xlabel="Freq", ylabel="Signal", styles=None, grid=True, show=True)
             
-            plot_parameters(self.parameters, show=True)
+            plot_parameters(self.fullparameters, self.parameter_state, show=True)
         else:
             self.info_label.setText("Please load data first.")
 
@@ -180,7 +183,46 @@ class THzGUI(QMainWindow):
             "",  # default directory (empty = current)
             "Text Files (*.txt);;All Files (*)"
             )
-        freq, n, k, alpha, e_r, e_i = self.parameters
+        if not file_path:
+            return
+        
+        try:
+            
+            #freq, n, k, alpha, e_r, e_i = self.parameters
+            freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.fullparameters
+            data_map = {
+                "n": n,
+                "k": k,
+                "alpha": alpha,
+                "eps_r": e_r,
+                "eps_i": e_i,
+                "cond_r": cond_r,
+                "cond_i":cond_i
+                }
+            for i in range(n.shape[0]):
+                
+                cols = [freq[i]]  # always include frequency
+                labels = ["Frequency(THz)"]
+            
+                for key, data in data_map.items():
+                    if self.parameter_state.get(key, False):
+                        cols.append(data[i])
+                        labels.append(key)
+                    
+                file_name = f"{file_path}_trace{i+1}.txt"
+                    
+                np.savetxt(
+                    file_name,
+                    np.column_stack(cols),
+                    delimiter="\t",
+                    header="\t".join(labels),
+                    comments=''
+                    )
+                
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Could not save data:\n{e}")
+            
+        """
         header = "Frequency(THz)\tn\tk\talpha\te_r\te_i"
         if file_path:
             try:
@@ -189,7 +231,7 @@ class THzGUI(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Could not save data:\n{e}")
         else:
-            QMessageBox.warning(self, "Cancelled", "Save cancelled")
+            QMessageBox.warning(self, "Cancelled", "Save cancelled")"""
     
     def open_advanced_options(self):
         self.advanced_window = AdvancedOptionsWindow(self.parameter_state, self)
