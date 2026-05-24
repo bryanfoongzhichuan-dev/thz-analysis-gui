@@ -52,7 +52,7 @@ def plot_multiple(datasets, labels=None, title="Multiple Signals", xlabel="X", y
     if show:
         plt.show()
 
-def plot_parameters(parameters, show=True):
+def plot_parameters(parameters, state, show=True):
     """
     Plot all THz parameters against frequency.
 
@@ -61,18 +61,31 @@ def plot_parameters(parameters, show=True):
     show: bool
         Whether to display the plots immediately
     """
-    freq, n, k, alpha, e_r, e_i = parameters
+    freq, n, k, alpha, e_r, e_i, cond_r, cond_i = parameters
 
     plots = [
-        (n, "Refractive Index n"),
-        (k, "Extinction Coefficient k"),
-        (alpha, "Absorption Coefficient α"),
-        (e_r, "Dielectric Constant ε_r"),
-        (e_i, "Dielectric Constant ε_i")
+        ("n", n, "Refractive Index n"),
+        ("k", k, "Extinction Coefficient k"),
+        ("alpha", alpha, "Absorption Coefficient α"),
+        ("eps_r", e_r, "Dielectric Constant ε_r"),
+        ("eps_i", e_i, "Dielectric Constant ε_i"),
+        ("cond_r", cond_r, "Conductivity real"),
+        ("cond_i", cond_i, "Conductivity imag")
     ]
     
-    for y, ylabel in plots:
-        plot_1d(freq[0], y, title=f"{ylabel} vs Frequency", xlabel="Frequency (THz)", ylabel=ylabel, show=show)
+    for key, y, ylabel in plots:
+        if state.get(key, False):
+            plot_1d(
+                freq[0],
+                y,
+                title=f"{ylabel} vs Frequency",
+                xlabel="Frequency (THz)",
+                ylabel=ylabel,
+                show=show
+                )
+    
+    """for y, ylabel in plots:
+        plot_1d(freq[0], y, title=f"{ylabel} vs Frequency", xlabel="Frequency (THz)", ylabel=ylabel, show=show)"""
         
 
         
