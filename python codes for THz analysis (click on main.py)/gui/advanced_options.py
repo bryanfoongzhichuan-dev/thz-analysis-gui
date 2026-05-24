@@ -91,6 +91,7 @@ class AdvancedOptionsWindow(QDialog):
         
         fit_layout.addWidget(self.model_box)
         
+        
         # =========================
         # FIT TARGET
         # =========================
@@ -126,9 +127,19 @@ class AdvancedOptionsWindow(QDialog):
         self.guess_sigma0 = QLineEdit("1000")
         self.guess_tau = QLineEdit("1e-13")
         
+        
         guess_form.addRow("Initial σ₀:", self.guess_sigma0)
         guess_form.addRow("Initial τ (s):", self.guess_tau)
         
+        # =========================
+        # DRUDE-SMITH EXTRA PARAM
+        # =========================
+        self.guess_c1 = QLineEdit("-0.5")
+        
+        self.c1_row_label = QLabel("Initial c₁:")
+        guess_form.addRow(self.c1_row_label, self.guess_c1)
+        self.model_box.currentTextChanged.connect(self.update_model_ui)
+
         fit_layout.addLayout(guess_form)
         
         # =========================
@@ -138,7 +149,7 @@ class AdvancedOptionsWindow(QDialog):
     
         fit_layout.addWidget(self.run_fit_button)
         
-        self.run_fit_button.clicked.connect(self.run_drude_fit)
+        self.run_fit_button.clicked.connect(self.run_fit)
     
         # =========================
         # RESULTS DISPLAY
@@ -170,6 +181,7 @@ class AdvancedOptionsWindow(QDialog):
         close_button = QPushButton("Close")
         close_button.clicked.connect(self.close)
         main_layout.addWidget(close_button)
+        self.update_model_ui()
 
     def get_selected_model(self):
         return self.model_box.currentText()
@@ -206,28 +218,26 @@ class AdvancedOptionsWindow(QDialog):
             # =========================
             freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.parent().fullparameters
             
-            # first trace only for now
             results = []
-
             for i in range(cond_r.shape[0]):
-
+            
                 sigma = cond_r[i] + 1j * cond_i[i]
-
+                
                 mask = (freq[i] >= fmin) & (freq[i] <= fmax)
-
+                
                 freq_fit = freq[i][mask]
                 sigma_fit = sigma[mask]
                 
-                sigma0_fit, tau_fit = fit_model(
+                sigma0_fit, tau_fit = fit_model_drude(
                     freq_fit,
                     sigma_fit,
                     p0=[sigma0_guess, tau_guess]
                     )
                 
                 results.append((sigma0_fit, tau_fit))
-            
+                
             text = ""
-            
+        
             for i, (sigma0_fit, tau_fit) in enumerate(results):
                 
                 text += (
@@ -238,26 +248,87 @@ class AdvancedOptionsWindow(QDialog):
                 
                 self.fit_results.setText(text)
             
-            """# =========================
-            # FREQUENCY MASK
-            # =========================
-            mask = (freq >= fmin) & (freq <= fmax)
-            
-            freq_fit = freq[mask]
-            sigma_fit = sigma[mask]
-            
-            # =========================
-            # RUN FIT
-            # =========================
-            sigma0_fit, tau_fit = fit_model(freq_fit, sigma_fit)
-            
-            # =========================
-            # DISPLAY RESULTS
-            # =========================
-            self.fit_results.setText(
-                f"σ₀ = {sigma0_fit:.3e} S/m\n"
-                f"τ = {tau_fit:.3e} s"
-                )"""
+
             
         except Exception as e:
             self.fit_results.setText(f"Fit failed:\n{e}")
+    
+    def run_drude_smith_fit(self):
+        
+        try:
+            
+            # =========================
+            # GET FREQUENCY RANGE
+            # =========================
+            fmin = float(self.freq_min.text())
+            fmax = float(self.freq_max.text())
+            
+            # =========================
+            # GET INITIAL GUESSES
+            # =========================
+            sigma0_guess = float(self.guess_sigma0.text())
+            tau_guess = float(self.guess_tau.text())
+            c1_guess = float(self.guess_c1.text())   # <-- NEW
+            
+            # =========================
+            # GET DATA FROM PARENT GUI
+            # =========================
+            freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.parent().fullparameters
+            
+            results = []
+            
+            for i in range(cond_r.shape[0]):
+                
+                sigma = cond_r[i] + 1j * cond_i[i]
+                
+                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+                
+                freq_fit = freq[i][mask]
+                sigma_fit = sigma[mask]
+                
+                sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith(
+                    freq_fit,
+                    sigma_fit,
+                    p0=[sigma0_guess, tau_guess, c1_guess]
+                    )
+                
+                results.append((sigma0_fit, tau_fit, c1_fit))
+                
+                text = ""
+                
+                for i, (sigma0_fit, tau_fit, c1_fit) in enumerate(results):
+                    
+                    text += (
+                        f"Trace {i+1}\n"
+                        f"σ₀ = {sigma0_fit:.3e} S/m\n"
+                        f"τ = {tau_fit:.3e} s\n"
+                        f"c₁ = {c1_fit:.3f}\n\n"
+                        )
+                    
+                    self.fit_results.setText(text)
+                    
+        except Exception as e:
+            self.fit_results.setText(f"Fit failed:\n{e}")
+    
+    def run_cole_drude_fit(self):
+        pass
+    
+    def run_fit(self):
+        model = self.model_box.currentText()
+        
+        if model == "Drude":
+            self.run_drude_fit()
+        elif model == "Drude_smith":
+            self.run_drude_smith_fit()
+        elif model == "Cole_drude":
+            self.run_cole_drude_fit()
+            
+    def update_model_ui(self):
+        model = self.model_box.currentText()
+        
+        if model == "Drude_smith":
+            self.c1_row_label.show()
+            self.guess_c1.show()
+        else:
+            self.c1_row_label.hide()
+            self.guess_c1.hide()
