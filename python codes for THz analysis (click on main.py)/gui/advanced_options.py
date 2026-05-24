@@ -7,8 +7,9 @@ Created on Fri May 22 23:32:28 2026
 from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QLabel,
     QTabWidget, QWidget,
-    QComboBox, QPushButton, QFormLayout, QCheckBox
+    QComboBox, QPushButton, QFormLayout, QCheckBox, QLineEdit
 )
+from analysis.models import *
 
 
 class AdvancedOptionsWindow(QDialog):
@@ -73,21 +74,89 @@ class AdvancedOptionsWindow(QDialog):
         # TAB 2: MODEL FIT
         # -------------------------
         self.tab_model_fit = QWidget()
-        fit_layout = QFormLayout()
-
-        fit_layout.addRow(QLabel("Select conductivity model:"))
-
+        
+        fit_layout = QVBoxLayout()
+        
+        # =========================
+        # MODEL SELECTION
+        # =========================
+        fit_layout.addWidget(QLabel("Select conductivity model:"))
+        
         self.model_box = QComboBox()
         self.model_box.addItems([
             "Drude",
             "Drude_smith",
             "Cole_drude"
-        ])
+            ])
+        
+        fit_layout.addWidget(self.model_box)
+        
+        # =========================
+        # FIT TARGET
+        # =========================
+        fit_layout.addWidget(QLabel("Fit target:"))
+        
+        self.fit_target_box = QComboBox()
+        self.fit_target_box.addItems([
+            "Conductivity Real (not coded yet)",
+            "Conductivity Imag (not coded yet)",
+            "Both"
+            ])
+        
+        fit_layout.addWidget(self.fit_target_box)
+        
+        # =========================
+        # FREQUENCY RANGE
+        # =========================
+        freq_form = QFormLayout()
+        
+        self.freq_min = QLineEdit("0.1")
+        self.freq_max = QLineEdit("3.0")
 
-        fit_layout.addRow(self.model_box)
-
+        freq_form.addRow("Min Frequency (THz):", self.freq_min)
+        freq_form.addRow("Max Frequency (THz):", self.freq_max)
+        
+        fit_layout.addLayout(freq_form)
+        
+        # =========================
+        # INITIAL GUESSES
+        # =========================
+        guess_form = QFormLayout()
+        
+        self.guess_sigma0 = QLineEdit("1000")
+        self.guess_tau = QLineEdit("1e-13")
+        
+        guess_form.addRow("Initial σ₀:", self.guess_sigma0)
+        guess_form.addRow("Initial τ (s):", self.guess_tau)
+        
+        fit_layout.addLayout(guess_form)
+        
+        # =========================
+        # RUN FIT BUTTON
+        # =========================
+        self.run_fit_button = QPushButton("Run Fit")
+    
+        fit_layout.addWidget(self.run_fit_button)
+        
+        self.run_fit_button.clicked.connect(self.run_drude_fit)
+    
+        # =========================
+        # RESULTS DISPLAY
+        # =========================
+        self.fit_results = QLabel("Fit results will appear here.")
+        
+        fit_layout.addWidget(self.fit_results)
+        
+        # =========================
+        # PLACEHOLDER FOR PLOT
+        # =========================
+        self.plot_placeholder = QLabel("Fit plot will appear here.")
+        
+        fit_layout.addWidget(self.plot_placeholder)
+        
+        # Set layout
         self.tab_model_fit.setLayout(fit_layout)
-
+        
         # Add tabs to widget
         self.tabs.addTab(self.tab_parameters, "Parameters")
         self.tabs.addTab(self.tab_model_fit, "Model Fit")
@@ -115,3 +184,80 @@ class AdvancedOptionsWindow(QDialog):
         self.state["cond_i"] = self.cb_cond_i.isChecked()
         
         event.accept()
+        
+    def run_drude_fit(self):
+
+        try:
+            
+            # =========================
+            # GET FREQUENCY RANGE
+            # =========================
+            fmin = float(self.freq_min.text())
+            fmax = float(self.freq_max.text())
+            
+            # =========================
+            # GET INITIAL GUESSES
+            # =========================
+            sigma0_guess = float(self.guess_sigma0.text())
+            tau_guess = float(self.guess_tau.text())
+            
+            # =========================
+            # GET DATA FROM PARENT GUI
+            # =========================
+            freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.parent().fullparameters
+            
+            # first trace only for now
+            results = []
+
+            for i in range(cond_r.shape[0]):
+
+                sigma = cond_r[i] + 1j * cond_i[i]
+
+                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+
+                freq_fit = freq[i][mask]
+                sigma_fit = sigma[mask]
+                
+                sigma0_fit, tau_fit = fit_model(
+                    freq_fit,
+                    sigma_fit,
+                    p0=[sigma0_guess, tau_guess]
+                    )
+                
+                results.append((sigma0_fit, tau_fit))
+            
+            text = ""
+            
+            for i, (sigma0_fit, tau_fit) in enumerate(results):
+                
+                text += (
+                    f"Trace {i+1}\n"
+                    f"σ₀ = {sigma0_fit:.3e} S/m\n"
+                    f"τ = {tau_fit:.3e} s\n\n"
+                    )
+                
+                self.fit_results.setText(text)
+            
+            """# =========================
+            # FREQUENCY MASK
+            # =========================
+            mask = (freq >= fmin) & (freq <= fmax)
+            
+            freq_fit = freq[mask]
+            sigma_fit = sigma[mask]
+            
+            # =========================
+            # RUN FIT
+            # =========================
+            sigma0_fit, tau_fit = fit_model(freq_fit, sigma_fit)
+            
+            # =========================
+            # DISPLAY RESULTS
+            # =========================
+            self.fit_results.setText(
+                f"σ₀ = {sigma0_fit:.3e} S/m\n"
+                f"τ = {tau_fit:.3e} s"
+                )"""
+            
+        except Exception as e:
+            self.fit_results.setText(f"Fit failed:\n{e}")

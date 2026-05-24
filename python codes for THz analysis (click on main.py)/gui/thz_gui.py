@@ -22,6 +22,7 @@ from core.visualisation import plot_multiple, plot_parameters, make_plot_list
 from gui.advanced_options import AdvancedOptionsWindow
 
 
+
 class THzGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -152,8 +153,6 @@ class THzGUI(QMainWindow):
             cond_r, cond_i = conductivity(freq, e_r, e_i)
             
             #maybe add parameters 2
-            self.parameters = (freq, n, k, a, e_r, e_i)
-            self.parameters2 = (cond_r, cond_i)
             self.fullparameters = (freq, n, k, a, e_r, e_i, cond_r, cond_i)
             
             '''
@@ -188,7 +187,6 @@ class THzGUI(QMainWindow):
         
         try:
             
-            #freq, n, k, alpha, e_r, e_i = self.parameters
             freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.fullparameters
             data_map = {
                 "n": n,
