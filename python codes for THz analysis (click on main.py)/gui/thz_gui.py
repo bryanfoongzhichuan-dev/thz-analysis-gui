@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib
 matplotlib.use('Qt5Agg')
 import matplotlib.pyplot as plt
+import re
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
@@ -81,40 +82,82 @@ class THzGUI(QMainWindow):
             "cond_r": False,
             "cond_i": False
             }
+    def parse_header(self, header_line):
+        result = {"R": np.nan, "X": np.nan, "Y": np.nan, "Z": np.nan}
+            
+        matches = re.findall(r'([RXYZ])=([-+]?\d*\.?\d+(?:[Ee][-+]?\d+)?)', header_line)
 
+        for key, val in matches:
+            result[key] = float(val)
+
+        return result
     def load_data_sample(self):
-        """Load sample dataset from file"""
-        #for bookkeeping
-        '''fname, _ = QFileDialog.getOpenFileName(self, "Open File", "","All Files (*.*);;CSV Files (*.csv);;Text Files (*.txt)")
-        if fname:
-            dataset = THzDataset.from_file(fname)
-            self.time_s, self.signal_s = dataset.time, dataset.signal
-            self.info_label1.setText(f"Sample file: {fname}")'''
-        
+
         fnames, _ = QFileDialog.getOpenFileNames(
             self,
             "Open Files",
             "",
             "All Files (*.*);;CSV Files (*.csv);;Text Files (*.txt)"
             )
-
-        if fnames:
-            time_list = []
-            signal_list = []
-
+        
+        if not fnames:
+            return
+        
+        time_list = []
+        signal_list = []
+        name_list = []
+        header_list = []
+        
         for fname in fnames:
-            dataset = THzDataset.from_file(fname)
-            time_list.append(dataset.time)
-            signal_list.append(dataset.signal)
+            with open(fname, "r") as f:
+                lines = f.readlines()
+                
+            # ---- detect header safely ----
+            header = None
+            data_lines = lines
+            
+            first_line = lines[0].strip()
+            
+            # safer check: if it contains letters → treat as header
+            if any(c.isalpha() for c in first_line):
+                header = first_line
+                data_lines = lines[1:]
+                
+            # ---- parse numeric data safely ----
+            data = []
+            for line in data_lines:
+                parts = line.strip().split()
+                if len(parts) >= 2:
+                    try:
+                        data.append([float(parts[0]), float(parts[1])])
+                    except:
+                        pass  # skip bad lines safely
+                        
+            data = np.array(data)
 
-        # Convert lists to 2D arrays (each row = one file)
-        self.time_s = np.array(time_list)
-        self.signal_s = np.array(signal_list)
-        self.info_label1.setText(f"Loaded {len(fnames)} sample files")
+            if data.size == 0:
+                continue  # skip broken file
+
+            time_list.append(data[:, 0])
+            signal_list.append(data[:, 1])
+            if first_line.startswith("Stage_Position"):
+                header_dict = self.parse_header(first_line)
+            else:
+                header_dict = {"R": np.nan, "X": np.nan, "Y": np.nan, "Z": np.nan}
+                
+            header_list.append(header_dict)
+            
+            print(header_dict)
+            name_list.append(fname)
+            
         self.time_s = np.squeeze(np.array(time_list))
         self.signal_s = np.squeeze(np.array(signal_list))
-
-    
+        
+        self.name_list = name_list
+        self.header_list = header_list
+        
+        self.info_label1.setText(f"Loaded {len(name_list)} sample files")
+        
     def load_data_blank(self):
         """Load blank dataset from file"""
         fname, _ = QFileDialog.getOpenFileName(self, "Open File", "","All Files (*.*);;CSV Files (*.csv);;Text Files (*.txt)")
@@ -208,32 +251,28 @@ class THzGUI(QMainWindow):
                         labels.append(key)
                     
                 file_name = f"{file_path}_trace{i+1}.txt"
+                
+                original_name = self.name_list[i] if hasattr(self, "name_list") else f"trace{i+1}"
                     
                 np.savetxt(
                     file_name,
                     np.column_stack(cols),
                     delimiter="\t",
-                    header="\t".join(labels),
+                    header=f"File: {original_name}\n" + "\t".join(labels),
                     comments=''
                     )
                 
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Could not save data:\n{e}")
             
-        """
-        header = "Frequency(THz)\tn\tk\talpha\te_r\te_i"
-        if file_path:
-            try:
-                [np.savetxt(f"{file_path}_trace{i+1}.txt", np.column_stack([freq[i], n[i], k[i], alpha[i], e_r[i], e_i[i]]),
-                    delimiter="\t", header=header, comments='') for i in range(n.shape[0])]
-            except Exception as e:
-                QMessageBox.critical(self, "Error", f"Could not save data:\n{e}")
-        else:
-            QMessageBox.warning(self, "Cancelled", "Save cancelled")"""
+
     
     def open_advanced_options(self):
         self.advanced_window = AdvancedOptionsWindow(self.parameter_state, self)
         self.advanced_window.show()
+    
+
+
 
 
 if __name__ == "__main__":
