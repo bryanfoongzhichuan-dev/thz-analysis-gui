@@ -12,6 +12,8 @@ from PyQt5.QtWidgets import (
 from analysis.models import *
 from collections import deque
 import matplotlib.pyplot as plt
+from matplotlib.figure import Figure
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 
 class AdvancedOptionsWindow(QDialog):
     def __init__(self, state, parent=None):
@@ -30,8 +32,19 @@ class AdvancedOptionsWindow(QDialog):
         # -------------------------
         # TAB 1: PARAMETERS
         # -------------------------
+    
         self.tab_parameters = QWidget()
         param_layout = QVBoxLayout()
+        
+        # Measurement mode selector
+        param_layout.addWidget(QLabel("Measurement mode:"))
+        
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Transmission", "Reflection"])
+        self.mode_combo.setCurrentText(
+            self.state.get("mode", "Transmission")
+            )
+        param_layout.addWidget(self.mode_combo)
         
         param_layout.addWidget(QLabel("Select parameters to include:"))
         
@@ -74,9 +87,11 @@ class AdvancedOptionsWindow(QDialog):
         # -------------------------
         # TAB 2: MODEL FIT
         # -------------------------
-        self.tab_model_fit = QWidget()
-        
         fit_layout = QVBoxLayout()
+        self.tab_model_fit = QWidget()
+        self.tab_model_fit.setLayout(fit_layout)
+        self.fit_window = FitPlotWindow()
+
         
         # =========================
         # MODEL SELECTION
@@ -100,8 +115,8 @@ class AdvancedOptionsWindow(QDialog):
         
         self.fit_target_box = QComboBox()
         self.fit_target_box.addItems([
-            "Conductivity Real (not coded yet)",
-            "Conductivity Imag (not coded yet)",
+            "Conductivity Real",
+            "Conductivity Imag",
             "Both"
             ])
         
@@ -151,7 +166,15 @@ class AdvancedOptionsWindow(QDialog):
         fit_layout.addWidget(self.run_fit_button)
         
         self.run_fit_button.clicked.connect(self.run_fit)
-    
+        
+        # =========================
+        # DISPLAY OPTIONS
+        # =========================
+        self.cb_show_all = QCheckBox("Display all graphs")
+        self.cb_show_all.setChecked(True)  # default ON or OFF, your choice
+        
+        fit_layout.addWidget(self.cb_show_all)
+
         # =========================
         # RESULTS DISPLAY
         # =========================
@@ -160,11 +183,13 @@ class AdvancedOptionsWindow(QDialog):
         fit_layout.addWidget(self.fit_results)
         
         # =========================
-        # PLACEHOLDER FOR PLOT
+        # PLOT AREA (REAL FIGURE)
         # =========================
-        self.plot_placeholder = QLabel("Fit plot will appear here.")
         
-        fit_layout.addWidget(self.plot_placeholder)
+        
+        #self.tabs.addTab(self.tab_model_fit, "Model Fit")
+        
+        
         
         # -------------------------
         # TAB 3: SAVING FORMAT
@@ -261,6 +286,8 @@ class AdvancedOptionsWindow(QDialog):
         return self.model_box.currentText()
     
     def closeEvent(self, event):
+        self.state["mode"] = self.mode_combo.currentText()
+        
         self.state["n"] = self.cb_n.isChecked()
         self.state["k"] = self.cb_k.isChecked()
         self.state["alpha"] = self.cb_alpha.isChecked()
@@ -302,11 +329,27 @@ class AdvancedOptionsWindow(QDialog):
                 freq_fit = freq[i][mask]
                 sigma_fit = sigma[mask]
                 
-                sigma0_fit, tau_fit = fit_model_drude(
-                    freq_fit,
-                    sigma_fit,
-                    p0=[sigma0_guess, tau_guess]
-                    )
+                if self.fit_target_box.currentText() == "Both":
+                    sigma0_fit, tau_fit = fit_model_drude(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess]
+                        )
+                elif self.fit_target_box.currentText() == "Conductivity Real":
+                    # Call the real-only fitting function we just created
+                    sigma0_fit, tau_fit = fit_model_drude_real_only(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess]
+                        )
+                
+                elif self.fit_target_box.currentText() == "Conductivity Imag":
+                    # Call the real-only fitting function we just created
+                    sigma0_fit, tau_fit = fit_model_drude_imag_only(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess]
+                        )
                 
                 results.append((sigma0_fit, tau_fit))
                 
@@ -321,7 +364,42 @@ class AdvancedOptionsWindow(QDialog):
                     )
                 
                 self.fit_results.setText(text)
+            
+
+
+            # =========================
+            # PLOT ALL TRACES IN SEPARATE POP-UPS
+            # =========================
+            # Keep track of window instances so Python's garbage collector doesn't destroy them
+            if not hasattr(self, 'pop_out_windows'):
+                self.pop_out_windows = []
+            
+            if self.cb_show_all.isChecked():
+                indices = range(len(results))
+            else:
+                indices = []   # or current selected trace if you want later
                 
+            for i in indices:
+                sigma0_fit, tau_fit = results[i]
+                sigma = cond_r[i] + 1j * cond_i[i]
+                
+                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+                freq_fit = freq[i][mask]
+                sigma_exp = sigma[mask]
+                
+                sigma_fit = drude(freq_fit, sigma0_fit, tau_fit)
+                
+                # Create a completely new, independent window instance for this trace
+                win = FitPlotWindow()
+                win.setWindowTitle(f"Fit Plot - Trace {i+1}")
+                win.plot(freq_fit, sigma_exp, sigma_fit)
+                win.show()
+                win.raise_()
+                
+                # Save the reference so the window stays open
+                self.pop_out_windows.append(win)
+                
+            
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Save Results",
@@ -426,10 +504,28 @@ class AdvancedOptionsWindow(QDialog):
                 freq_fit = freq[i][mask]
                 sigma_fit = sigma[mask]
                 
-                sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith(
-                    freq_fit,
-                    sigma_fit,
-                    p0=[sigma0_guess, tau_guess, c1_guess]
+                # Make sure you have extracted c1_guess from your QLineEdit above this block:
+                # c1_guess = float(self.guess_c1.text())
+
+                if self.fit_target_box.currentText() == "Both":
+                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess, c1_guess]
+                    )
+                    
+                elif self.fit_target_box.currentText() == "Conductivity Real":
+                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_real_only(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess, c1_guess]
+                    )
+                
+                elif self.fit_target_box.currentText() == "Conductivity Imag":
+                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_imag_only(
+                        freq_fit,
+                        sigma_fit,
+                        p0=[sigma0_guess, tau_guess, c1_guess]
                     )
                 
                 results.append((sigma0_fit, tau_fit, c1_fit))
@@ -448,6 +544,36 @@ class AdvancedOptionsWindow(QDialog):
                     
                 self.fit_results.setText(text)
         
+            # =========================
+            # PLOT ALL TRACES IN SEPARATE POP-UPS
+            # =========================
+            if not hasattr(self, 'pop_out_windows'):
+                self.pop_out_windows = []
+                
+            if self.cb_show_all.isChecked():
+                indices = range(len(results))
+            else:
+                indices = [0]   # or current selected trace if you want later
+                
+            for i in indices:
+                sigma0_fit, tau_fit, c1_fit = results[i]
+                sigma = cond_r[i] + 1j * cond_i[i]
+                
+                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+                freq_fit = freq[i][mask]
+                sigma_exp = sigma[mask]
+                
+                # Swap this with your actual drude_smith function definition
+                sigma_fit = drude_smith(freq_fit, sigma0_fit, tau_fit, c1_fit) 
+                
+                win = FitPlotWindow()
+                win.setWindowTitle(f"Fit Plot - Trace {i+1}")
+                win.plot(freq_fit, sigma_exp, sigma_fit)
+                win.show()
+                win.raise_()
+                
+                self.pop_out_windows.append(win)
+                
             file_path, _ = QFileDialog.getSaveFileName(
                 self,
                 "Save Results",
@@ -561,6 +687,9 @@ class AdvancedOptionsWindow(QDialog):
         
         
     def on_convert_data_to_image(self):
+        
+
+    
 
         file_path, _ = QFileDialog.getOpenFileName(
             self,
@@ -635,3 +764,41 @@ class AdvancedOptionsWindow(QDialog):
             plt.savefig(save_path, dpi=300)
             
         plt.show()
+        
+    def plot_fit(self, freq, sigma_exp, sigma_fit):
+        self.fit_window.plot(freq, sigma_exp, sigma_fit)
+        self.fit_window.show()
+        self.fit_window.raise_()
+        
+class FitPlotWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("Fit Plot")
+        self.resize(800, 600)
+
+        layout = QVBoxLayout()
+        self.setLayout(layout)
+
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+
+        layout.addWidget(self.canvas)
+
+        self.ax = self.figure.add_subplot(111)
+
+    def plot(self, freq, sigma_exp, sigma_fit):
+        self.ax.clear()
+
+        self.ax.scatter(freq, sigma_exp.real, s=10, label="Re(Exp)", alpha=0.7)
+        self.ax.scatter(freq, sigma_exp.imag, s=10, label="Im(Exp)", alpha=0.7)
+
+        self.ax.plot(freq, sigma_fit.real, label="Re(Fit)")
+        self.ax.plot(freq, sigma_fit.imag, label="Im(Fit)")
+
+        self.ax.set_xlabel("Frequency (THz)")
+        self.ax.set_ylabel("Conductivity")
+        self.ax.legend()
+        self.ax.grid(True)
+
+        self.canvas.draw()

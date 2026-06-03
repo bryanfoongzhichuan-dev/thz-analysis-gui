@@ -80,7 +80,8 @@ class THzGUI(QMainWindow):
             "eps_r": True,
             "eps_i": True,
             "cond_r": False,
-            "cond_i": False
+            "cond_i": False,
+            "mode": "Transmission"
             }
     def parse_header(self, header_line):
         result = {"R": np.nan, "X": np.nan, "Y": np.nan, "Z": np.nan}
@@ -179,20 +180,42 @@ class THzGUI(QMainWindow):
         except ValueError:
             QMessageBox.warning(self, "Invalid Input", "Please enter a valid number.")
             return self.get_numeric_input(prompt)  # Ask again recursively    
+        
+    def get_angle(self, prompt="Enter angle (degrees):"):
+        """Ask the user for an angle in degrees and return it as a float."""
+        text, ok = QInputDialog.getText(self, "Input Required", prompt)
+        
+        if not ok:  # User cancelled
+            return None
+        
+        try:
+            value = float(text)  # Convert to float
+            return value
+        except ValueError:
+            QMessageBox.warning(self, "Invalid Input", "Please enter a valid number.")
+            return self.get_angle(prompt)  # retry safely
     
     def extract_para(self):
         """Run FFT using your thz_analysis.fft function"""
         if self.time_s is not None and self.signal_s is not None and self.time_b is not None and self.signal_b is not None:
-            thickness = self.get_thickness()
             (y_s ,freq, p_s) = fft(self.time_s, self.signal_s) 
             (y_b, freq2, p_b) = fft(self.time_b, self.signal_b)
             self.fftresults = (freq, y_s, p_s, freq2, y_b, p_b)
+            if self.parameter_state["mode"] == "Transmission":
+                thickness = self.get_thickness()
+                n = n_transmission(freq, p_s, p_b, thickness)
+                k = k_transmission(freq, np.abs(y_s), np.abs(y_b), n, thickness)
+                a = a_transmission(freq, k)
+                e_r, e_i = dielec_transmission(freq, n, a)
             
-            
-            n = n_f(freq, p_s, p_b, thickness)
-            k = k_f(freq, np.abs(y_s), np.abs(y_b), n, thickness)
-            a = a_f(freq, k)
-            e_r, e_i = dielec(freq, n, a)
+            elif self.parameter_state["mode"] == "Reflection":
+                angle = self.get_angle()
+                n = n_reflection(freq, p_s, p_b, angle)
+                k = k_reflection(freq, n, np.abs(y_s), np.abs(y_b), angle)
+                a = alpha_reflection(freq, k)
+                e_r, e_i = dielec_reflection(n, k)
+
+                
             cond_r, cond_i = conductivity(freq, e_r, e_i)
             
             #maybe add parameters 2
