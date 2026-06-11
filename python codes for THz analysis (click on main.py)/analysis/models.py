@@ -93,7 +93,7 @@ def fit_model_drude_imag_only(freq_thz, sigma_exp, p0):
         model_imag,
         freq_thz,
         ydata_imag,  # Matching imaginary model output to imaginary data
-        p0=p0,
+        p0=p0
     )
 
     sigma0_fit, tau_fit = popt
@@ -122,13 +122,14 @@ def fit_model_drude(freq_thz, sigma_exp, p0):
         return np.concatenate([sigma.real, sigma.imag])
 
     ydata = np.concatenate([sigma_exp.real, sigma_exp.imag])
-
+    #print("its working")
     popt, pcov = curve_fit(
         model,
         freq_thz,
         ydata,
-        p0
+        p0         #after this delete
     )
+    
     #p0 is initial guess
     sigma0, tau = popt
     

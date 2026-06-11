@@ -19,15 +19,39 @@ class AdvancedOptionsWindow(QDialog):
     def __init__(self, state, parent=None):
         super().__init__(parent)
         self.state = state
-
+        #print(self.x_s)
         self.setWindowTitle("Advanced Options")
-        self.setGeometry(300, 300, 400, 250)
+        self.setGeometry(300, 300, 800, 250)
 
         main_layout = QVBoxLayout()
         self.setLayout(main_layout)
 
         # Create tab widget (this is the "Chrome tabs")
         self.tabs = QTabWidget()
+        
+        # -------------------------
+        # TAB 0: SYSTEM SELECTED FOR LOADING
+        # -------------------------
+        self.tab_system_loading = QWidget()
+        
+        system_layout = QVBoxLayout()
+        
+        system_layout.addWidget(QLabel("Select system:"))
+        
+        self.system_box = QComboBox()
+        self.system_box.addItems([
+            "Menlo",
+            "Startera"
+            ])
+        self.system_box.setCurrentText(
+            self.state.get("system", "Melo system")
+        )
+
+        system_layout.addWidget(self.system_box)
+        
+        system_layout.addStretch()
+        
+        self.tab_system_loading.setLayout(system_layout)
 
         # -------------------------
         # TAB 1: PARAMETERS
@@ -48,7 +72,13 @@ class AdvancedOptionsWindow(QDialog):
         
         param_layout.addWidget(QLabel("Select parameters to include:"))
         
-        # Tick boxes (parameters)
+        param_layout.addWidget(QLabel("Select parameters to include:"))
+        
+        # ==========================
+        # LEFT COLUMN (parameters)
+        # ==========================
+        checkbox_layout = QVBoxLayout()
+        
         self.cb_n = QCheckBox("Refractive index (n)")
         self.cb_n.setChecked(self.state["n"])
         
@@ -69,18 +99,33 @@ class AdvancedOptionsWindow(QDialog):
         
         self.cb_cond_i = QCheckBox("Conductivity imag (σi)")
         self.cb_cond_i.setChecked(self.state["cond_i"])
-            
-        # Default: all unchecked (or you can set True if you want)
-        # self.cb_n.setChecked(True)
         
-        # Add to layout
-        param_layout.addWidget(self.cb_n)
-        param_layout.addWidget(self.cb_k)
-        param_layout.addWidget(self.cb_alpha)
-        param_layout.addWidget(self.cb_eps_r)
-        param_layout.addWidget(self.cb_eps_i)
-        param_layout.addWidget(self.cb_cond_r)
-        param_layout.addWidget(self.cb_cond_i)
+        checkbox_layout.addWidget(self.cb_n)
+        checkbox_layout.addWidget(self.cb_k)
+        checkbox_layout.addWidget(self.cb_alpha)
+        checkbox_layout.addWidget(self.cb_eps_r)
+        checkbox_layout.addWidget(self.cb_eps_i)
+        checkbox_layout.addWidget(self.cb_cond_r)
+        checkbox_layout.addWidget(self.cb_cond_i)
+        
+        # ==========================
+        # RIGHT COLUMN (new checkbox)
+        # ==========================
+        self.cb_g = QCheckBox("plot all parameter graphs")
+        self.cb_g.setChecked(self.state.get("plot_all_params", True))
+        
+        right_layout = QVBoxLayout()
+        right_layout.addWidget(self.cb_g)
+        right_layout.addStretch()
+        
+        # ==========================
+        # COMBINE LEFT + RIGHT
+        # ==========================
+        combined_layout = QHBoxLayout()
+        combined_layout.addLayout(checkbox_layout)
+        combined_layout.addLayout(right_layout)
+        
+        param_layout.addLayout(combined_layout)
         
         self.tab_parameters.setLayout(param_layout)
 
@@ -202,7 +247,8 @@ class AdvancedOptionsWindow(QDialog):
         self.save_format_box = QComboBox()
         self.save_format_box.addItems([
             "3D datasets",
-            "Random datasets"
+            "Random datasets",
+            "Startera"
             ])
         self.save_format_box.setCurrentIndex(1)  # default = Random datasets
         save_layout.addWidget(self.save_format_box)
@@ -265,12 +311,13 @@ class AdvancedOptionsWindow(QDialog):
         self.tab_model_fit.setLayout(fit_layout)
         
         # Add tabs to widget
+        self.tabs.addTab(self.tab_system_loading, "System selected for loading")
         self.tabs.addTab(self.tab_parameters, "Parameters")
         self.tabs.addTab(self.tab_model_fit, "Model Fit")
         self.tabs.addTab(self.tab_saving_format, "Saving Format")
 
-        # IMPORTANT: default tab = Model Fit (index 1)
-        self.tabs.setCurrentIndex(1)
+        # IMPORTANT: default tab = Model Fit (index 2)
+        self.tabs.setCurrentIndex(2)
 
         main_layout.addWidget(self.tabs)
         
@@ -296,12 +343,13 @@ class AdvancedOptionsWindow(QDialog):
         self.state["cond_r"] = self.cb_cond_r.isChecked()
         self.state["cond_i"] = self.cb_cond_i.isChecked()
         
+        self.state["system"] = self.system_box.currentText()
+        self.state["plot_all_params"] = self.cb_g.isChecked()
+        
         event.accept()
         
     def run_drude_fit(self):
-
         try:
-            
             # =========================
             # GET FREQUENCY RANGE
             # =========================
@@ -318,44 +366,56 @@ class AdvancedOptionsWindow(QDialog):
             # GET DATA FROM PARENT GUI
             # =========================
             freq, n, k, alpha, e_r, e_i, cond_r, cond_i = self.parent().fullparameters
-            
             results = []
+               
             for i in range(cond_r.shape[0]):
+                try:
+                    sigma = cond_r[i] + 1j * cond_i[i]
+                    
+                    mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+                    freq_fit = freq[i][mask]
+                    sigma_fit = sigma[mask]
+                    
+                    if len(freq_fit) == 0:
+                        raise ValueError("Empty frequency window")
+                        
+                    mode = self.fit_target_box.currentText()
+                    
+                    if mode == "Both":
+                        sigma0_fit, tau_fit = fit_model_drude(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess]
+                            )
+                        
+                    elif mode == "Conductivity Real":
+                        sigma0_fit, tau_fit = fit_model_drude_real_only(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess]
+                            )
+                        
+                    elif mode == "Conductivity Imag":
+                        sigma0_fit, tau_fit = fit_model_drude_imag_only(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess]
+                            )   
+
+                    results.append((sigma0_fit, tau_fit))
+                    
+                except Exception as e:
+                    results.append(( np.nan, np.nan))
+                    continue
+
             
-                sigma = cond_r[i] + 1j * cond_i[i]
-                
-                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
-                
-                freq_fit = freq[i][mask]
-                sigma_fit = sigma[mask]
-                
-                if self.fit_target_box.currentText() == "Both":
-                    sigma0_fit, tau_fit = fit_model_drude(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess]
-                        )
-                elif self.fit_target_box.currentText() == "Conductivity Real":
-                    # Call the real-only fitting function we just created
-                    sigma0_fit, tau_fit = fit_model_drude_real_only(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess]
-                        )
-                
-                elif self.fit_target_box.currentText() == "Conductivity Imag":
-                    # Call the real-only fitting function we just created
-                    sigma0_fit, tau_fit = fit_model_drude_imag_only(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess]
-                        )
-                
-                results.append((sigma0_fit, tau_fit))
-                
+              
             text = ""
         
-            for i, (sigma0_fit, tau_fit) in enumerate(results):
+            max_show = min(3, len(results))
+
+            for i in range(max_show):
+                sigma0_fit, tau_fit = results[i]
                 
                 text += (
                     f"Trace {i+1}\n"
@@ -363,7 +423,10 @@ class AdvancedOptionsWindow(QDialog):
                     f"τ = {tau_fit:.3e} s\n\n"
                     )
                 
-                self.fit_results.setText(text)
+            if len(results) > 3:
+                text += f"... +{len(results) - 3} more traces"
+                
+            self.fit_results.setText(text)
             
 
 
@@ -421,14 +484,15 @@ class AdvancedOptionsWindow(QDialog):
             # MODE SWITCH (you will define this later)
             # -------------------------
             mode = self.save_format_box.currentText()
-            headers = self.parent().header_list
+            
             
             if mode == "Random datasets":
+                headers = self.parent().header_list
                 data = np.column_stack([names, sigma0, tau])
                 header = "file_name\tsigma0\ttau"
             
             elif mode == "3D datasets":
-
+                headers = self.parent().header_list
                 selected_axes = list(self.axis_order)
                 
                 if len(selected_axes) != 2:
@@ -444,16 +508,11 @@ class AdvancedOptionsWindow(QDialog):
                 data = np.column_stack([col1, col2, sigma0, tau])
                 header = f"{selected_axes[0]}\t{selected_axes[1]}\tsigma0\ttau"
                 
-                
-            """# Convert everything into strings for safe saving
-            data = np.column_stack([
-                names,
-                sigma0,
-                tau
-                ])
-            
-            header = "file_name\tsigma0\ttau"
-            """
+            elif mode == "Startera":
+                print(self.parent().x_s)
+                data = np.column_stack([self.parent().x_s, self.parent().y_s, sigma0, tau])
+                header = f"x\ty\tsigma0\ttau"
+
             np.savetxt(
                 file_path,
                 data,
@@ -497,52 +556,63 @@ class AdvancedOptionsWindow(QDialog):
             
             for i in range(cond_r.shape[0]):
                 
-                sigma = cond_r[i] + 1j * cond_i[i]
-                
-                mask = (freq[i] >= fmin) & (freq[i] <= fmax)
-                
-                freq_fit = freq[i][mask]
-                sigma_fit = sigma[mask]
-                
-                # Make sure you have extracted c1_guess from your QLineEdit above this block:
-                # c1_guess = float(self.guess_c1.text())
-
-                if self.fit_target_box.currentText() == "Both":
-                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess, c1_guess]
-                    )
+                try:
+                    sigma = cond_r[i] + 1j * cond_i[i]
                     
-                elif self.fit_target_box.currentText() == "Conductivity Real":
-                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_real_only(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess, c1_guess]
-                    )
-                
-                elif self.fit_target_box.currentText() == "Conductivity Imag":
-                    sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_imag_only(
-                        freq_fit,
-                        sigma_fit,
-                        p0=[sigma0_guess, tau_guess, c1_guess]
-                    )
-                
-                results.append((sigma0_fit, tau_fit, c1_fit))
-            
+                    mask = (freq[i] >= fmin) & (freq[i] <= fmax)
+                    
+                    freq_fit = freq[i][mask]
+                    sigma_fit = sigma[mask]
+                    
+                    # Make sure you have extracted c1_guess from your QLineEdit above this block:
+                    # c1_guess = float(self.guess_c1.text())
+                    
+                    if self.fit_target_box.currentText() == "Both":
+                        sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess, c1_guess]
+                            )
+                        
+                    elif self.fit_target_box.currentText() == "Conductivity Real":
+                        sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_real_only(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess, c1_guess]
+                            )
+                        
+                    elif self.fit_target_box.currentText() == "Conductivity Imag":
+                        sigma0_fit, tau_fit, c1_fit = fit_model_drude_smith_imag_only(
+                            freq_fit,
+                            sigma_fit,
+                            p0=[sigma0_guess, tau_guess, c1_guess]
+                            )
+                        
+                    results.append((sigma0_fit, tau_fit, c1_fit))
+                    
+                except Exception:
+                    # strict fallback: always numeric, never crash pipeline
+                    results.append((np.nan, np.nan, np.nan))
+                    continue
             #    
             text = ""
                 
-            for i, (sigma0_fit, tau_fit, c1_fit) in enumerate(results):
-            
+            max_show = min(3, len(results))
+
+            for i in range(max_show):
+                sigma0_fit, tau_fit, c1_fit = results[i]
+                
                 text += (
                     f"Trace {i+1}\n"
                     f"σ₀ = {sigma0_fit:.3e} S/m\n"
                     f"τ = {tau_fit:.3e} s\n"
                     f"c₁ = {c1_fit:.3f}\n\n"
                     )
+                
+            if len(results) > 3:
+                text += f"... +{len(results) - 3} more traces"
                     
-                self.fit_results.setText(text)
+            self.fit_results.setText(text)
         
             # =========================
             # PLOT ALL TRACES IN SEPARATE POP-UPS
@@ -591,14 +661,15 @@ class AdvancedOptionsWindow(QDialog):
             c1 = np.array(c1)
             
             names = np.array(self.parent().name_list)
-            headers = self.parent().header_list
+            
             
             if mode == "Random datasets":
+                headers = self.parent().header_list
                 data = np.column_stack([names, sigma0, tau, c1])
                 header = "file_name\tsigma0\ttau\tc1"
             
             elif mode == "3D datasets":
-
+                headers = self.parent().header_list
                 selected_axes = list(self.axis_order)
                 
                 if len(selected_axes) != 2:
@@ -611,7 +682,12 @@ class AdvancedOptionsWindow(QDialog):
                 
                 data = np.column_stack([col1, col2, sigma0, tau, c1])
                 header = f"{axis1}\t{axis2}\tsigma0\ttau\tc1"
-            
+                
+            elif mode == "Startera":
+                print(self.parent().x_s)
+                data = np.column_stack([self.parent().x_s, self.parent().y_s, sigma0, tau])
+                header = f"x\ty\tsigma0\ttau\tc1"
+                
             np.savetxt(
                 file_path,
                 data,
