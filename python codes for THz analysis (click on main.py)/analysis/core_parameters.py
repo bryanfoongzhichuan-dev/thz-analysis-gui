@@ -79,8 +79,10 @@ def dielec_transmission(freq, n, a):
     return e_r, e_i
 
 def c0_wd_f(freq, t):
-    c0_wd = 3e8/(2*np.pi*freq*1e12*t*1e-3)
-    return c0_wd
+    if t is None:
+        raise ValueError("Thickness t is required (got None)")
+
+    return 3e8/(2*np.pi*freq*1e12*t*1e-3)
 
 #reflection datas
 
@@ -96,61 +98,86 @@ def calculate_fresnel_phase(n, theta):
     r = 0.5 * (rs + rp)
     return np.angle(r)
 
-
 def n_reflection(freq, p_s, p_b, angle):
-    """
-    Invert phase difference to refractive index in reflection mode.
-    """
 
     theta = math.radians(angle)
 
-    # force numpy arrays
+    freq = np.array(freq)
     p_s = np.array(p_s)
     p_b = np.array(p_b)
 
-    # compute phase difference
-    phase_diff = np.unwrap(p_s - p_b)
+    # =========================
+    # SINGLE TRACE
+    # =========================
+    if p_s.ndim == 1:
 
-    # ensure 1D
-    phase_diff = np.ravel(phase_diff)
+        return _solve_n(np.unwrap(p_s - p_b), theta)
+
+    # =========================
+    # MULTI TRACE
+    # =========================
+    n_traces = p_s.shape[0]
+
+    results = []
+
+    for i in range(n_traces):
+
+        ps_i = p_s[i]
+
+        # 🔥 FIX: safe broadcasting rule
+        if p_b.ndim == 1:
+            pb_i = p_b
+        elif p_b.shape[0] == 1:
+            pb_i = p_b[0]
+        else:
+            pb_i = p_b[i]
+
+        phase_diff = np.unwrap(ps_i - pb_i)
+
+        results.append(_solve_n(phase_diff, theta))
+
+    return np.array(results)
+
+
+def _solve_n(phase_diff, theta):
 
     n_out = np.zeros_like(phase_diff, dtype=float)
 
-    for i, dphi in enumerate(phase_diff):
+    for j, dphi in enumerate(phase_diff):
 
-        low, high = 1.0, 100.0
-        guess_n = 0.5 * (low + high)
+        target = float(dphi)
 
-        target = float(dphi)   #  FORCE SCALAR
+        # -------------------------
+        # search space
+        # -------------------------
+        n_grid = np.linspace(1.0, 20.0, 400)
 
-        for _ in range(100):
-            model_phi = float(calculate_fresnel_phase(guess_n, theta))
+        best_n = 1.0
+        best_err = np.inf
 
-            if model_phi > target:
-                high = guess_n
-            else:
-                low = guess_n
+        for n in n_grid:
 
-            guess_n = 0.5 * (low + high)
+            model_phi = calculate_fresnel_phase(n, theta)
 
-        n_out[i] = guess_n
+            err = (model_phi - target) ** 2
+
+            if err < best_err:
+                best_err = err
+                best_n = n
+
+        n_out[j] = best_n
 
     return n_out
 
 def fresnel_reflection_magnitude(n, k, theta):
-    """
-    Compute |r| for s/p averaged reflection (simplified scalar model).
-    """
 
     nc = n + 1j * k
     cos_t = np.cos(theta)
 
-    # approximate transmission angle
     sin_t = np.sin(theta)
     sin_t2 = sin_t / nc
 
-    # avoid invalid sqrt
-    sin_t2 = np.clip(np.real(sin_t2), -1, 1)
+    sin_t2 = np.clip(np.abs(sin_t2), 0, 1)
     cos_t2 = np.sqrt(1 - sin_t2**2)
 
     rs = (cos_t - nc * cos_t2) / (cos_t + nc * cos_t2)
@@ -160,13 +187,12 @@ def fresnel_reflection_magnitude(n, k, theta):
     return np.abs(r)
 
 
-def k_reflection(freq, n, amp_s, amp_b, angle):
+def k_reflection_single(freq, n, amp_s, amp_b, angle):
+
     theta = math.radians(angle)
 
-    amp_s = np.ravel(np.array(amp_s))
-    amp_b = np.ravel(np.array(amp_b))
-
-    amp_diff = amp_s / (amp_b + 1e-12)   # avoid divide by zero
+    amp_diff = amp_s / (amp_b + 1e-12)
+    amp_diff = np.ravel(amp_diff)
 
     k_out = np.zeros_like(amp_diff, dtype=float)
 
@@ -175,11 +201,15 @@ def k_reflection(freq, n, amp_s, amp_b, angle):
         low, high = 0.0, 10.0
         guess_k = 0.5 * (low + high)
 
-        target = float(target_amp)   # 🔥 FORCE SCALAR
+        target = float(target_amp)
 
-        for _ in range(100):
+        n_i = n if np.ndim(n) == 0 else n[i]
 
-            model = float(fresnel_reflection_magnitude(n[i], guess_k, theta))
+        for _ in range(80):
+
+            model = float(
+                fresnel_reflection_magnitude(n_i, guess_k, theta)
+            )
 
             if model > target:
                 high = guess_k
@@ -191,6 +221,45 @@ def k_reflection(freq, n, amp_s, amp_b, angle):
         k_out[i] = guess_k
 
     return k_out
+
+def k_reflection(freq, n, amp_s, amp_b, angle):
+
+    freq = np.array(freq)
+    n = np.array(n)
+    amp_s = np.array(amp_s)
+    amp_b = np.array(amp_b)
+
+    theta = math.radians(angle)
+
+    n_traces = freq.shape[0]
+
+    results = []
+
+    for i in range(n_traces):
+
+        n_i = n if n.ndim == 1 else n[i]
+
+        amp_s_i = amp_s[i]
+
+        # 🔥 KEY FIX: broadcast safely
+        if amp_b.ndim == 1:
+            amp_b_i = amp_b
+        elif amp_b.shape[0] == 1:
+            amp_b_i = amp_b[0]
+        else:
+            amp_b_i = amp_b[i]
+
+        k_i = k_reflection_single(
+            freq[i],
+            n_i,
+            amp_s_i,
+            amp_b_i,
+            angle
+        )
+
+        results.append(k_i)
+
+    return np.array(results)
 
 def alpha_reflection(freq, k):
     """
@@ -204,16 +273,25 @@ def alpha_reflection(freq, k):
 
 
 def dielec_reflection(n, k):
-    """
-    Returns:
-        eps_r, eps_i
-    """
+
+    n = np.array(n)
+    k = np.array(k)
+
+    if n.shape != k.shape:
+        raise ValueError(f"Shape mismatch: n{n.shape}, k{k.shape}")
 
     eps_r = n**2 - k**2
     eps_i = 2 * n * k
 
     return eps_r, eps_i
 
+def ensure_batch(x):
+    x = np.array(x)
+
+    if x.ndim == 1:
+        return x[np.newaxis, :]   # (1, M)
+
+    return x
 
 #universal parameter
 eps0 = 8.854e-12  # vacuum permittivity

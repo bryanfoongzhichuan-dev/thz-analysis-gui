@@ -93,7 +93,7 @@ def fit_model_drude_imag_only(freq_thz, sigma_exp, p0):
         model_imag,
         freq_thz,
         ydata_imag,  # Matching imaginary model output to imaginary data
-        p0=p0,
+        p0=p0
     )
 
     sigma0_fit, tau_fit = popt
@@ -122,13 +122,14 @@ def fit_model_drude(freq_thz, sigma_exp, p0):
         return np.concatenate([sigma.real, sigma.imag])
 
     ydata = np.concatenate([sigma_exp.real, sigma_exp.imag])
-
+    #print("its working")
     popt, pcov = curve_fit(
         model,
         freq_thz,
         ydata,
-        p0
+        p0         #after this delete
     )
+    
     #p0 is initial guess
     sigma0, tau = popt
     
@@ -291,6 +292,54 @@ def cole_drude_model(ep_inf, delta_ep, tau, alpha,
     n_im = -np.sqrt((-ep_re + np.sqrt(ep_re**2 + ep_im**2)) / 2)
 
     return n_re, n_im
+
+
+def lorentzian_single(freq_thz, A, f0, gamma, y0):
+    """
+    Single Lorentzian peak model
+
+    Parameters
+    ----------
+    freq_thz : array
+        Frequency in THz
+    A : float
+        Peak amplitude
+    f0 : float
+        Resonance frequency (THz)
+    gamma : float
+        Half-width at half-maximum (THz)
+    y0 : float
+        Constant baseline offset
+
+    Returns
+    -------
+    y : array
+        Lorentzian function
+    Note: THZ no need convert because only dealing with peak shapes
+    """
+
+    y = y0 + (A * gamma**2) / ((freq_thz - f0)**2 + gamma**2)
+
+    return y
+
+def fit_model_lorentzian(freq_thz, y_exp, p0):
+    """
+    Fit a single Lorentzian model to experimental data
+    Note:cannot fit complex stuff. Its purely a lineshape fitting
+    """
+
+    def model(freq, A, f0, gamma, y0):
+        return lorentzian_single(freq, A, f0, gamma, y0)
+
+    popt, pcov = curve_fit(
+        model,
+        freq_thz,
+        y_exp,
+        p0=p0
+    )
+
+    A, f0, gamma, y0 = popt
+    return A, f0, gamma, y0
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
